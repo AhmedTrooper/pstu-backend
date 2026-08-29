@@ -30,7 +30,7 @@ demo:
 	./scripts/demo.sh
 
 docker-dev:
-	docker compose up -d postgres redis nats jaeger
+	docker compose up -d --wait postgres redis nats jaeger
 
 docker:
 	docker compose up -d --build

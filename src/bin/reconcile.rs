@@ -13,11 +13,31 @@ async fn main() {
     println!("============================================================");
     println!("Connecting to database: {}", config.database_url);
 
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&config.database_url)
-        .await
-        .expect("failed to connect to PostgreSQL database");
+    let mut pool_opt = None;
+    for attempt in 1..=15 {
+        match PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(3))
+            .connect(&config.database_url)
+            .await
+        {
+            Ok(p) => {
+                pool_opt = Some(p);
+                break;
+            }
+            Err(e) => {
+                if attempt == 15 {
+                    panic!("failed to connect to PostgreSQL database: {}", e);
+                }
+                println!(
+                    "Waiting for PostgreSQL to become ready (attempt {}/15)...",
+                    attempt
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            }
+        }
+    }
+    let pool = pool_opt.unwrap();
 
     println!("Running 3-contract verification audit on live ledger...");
     match run_reconciliation(&pool).await {

@@ -14,8 +14,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting PSTU Payment Gateway API...");
 
-    let config = AppConfig::load_from_env()
-        .map_err(|e| format!("Configuration initialization failed: {}", e))?;
+    let config = AppConfig::load_from_env().map_err(|e| {
+        Box::<dyn std::error::Error>::from(format!("Configuration initialization failed: {}", e))
+    })?;
 
     info!(
         host = %config.host,
@@ -23,15 +24,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Configuration loaded successfully"
     );
 
-    // Initialize PostgreSQL connection pool
-    let db_pool = PgPoolOptions::new()
-        .max_connections(50)
-        .connect(&config.database_url)
-        .await
-        .map_err(|e| {
-            error!(error = ?e, "Failed to connect to PostgreSQL");
-            e
-        })?;
+    // Initialize PostgreSQL connection pool with retry resilience
+    let mut db_pool_opt = None;
+    for attempt in 1..=15 {
+        match PgPoolOptions::new()
+            .max_connections(50)
+            .acquire_timeout(std::time::Duration::from_secs(3))
+            .connect(&config.database_url)
+            .await
+        {
+            Ok(pool) => {
+                db_pool_opt = Some(pool);
+                break;
+            }
+            Err(e) => {
+                if attempt == 15 {
+                    error!(error = ?e, "Failed to connect to PostgreSQL after multiple attempts");
+                    return Err(Box::new(e) as Box<dyn std::error::Error>);
+                }
+                info!(
+                    "Waiting for PostgreSQL to become ready (attempt {}/15)...",
+                    attempt
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            }
+        }
+    }
+    let db_pool = db_pool_opt.unwrap();
 
     info!("Connected to PostgreSQL database");
 
@@ -42,22 +61,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| {
             error!(error = ?e, "Failed to execute database migrations");
-            e
+            Box::new(e) as Box<dyn std::error::Error>
         })?;
     info!("Database migrations executed successfully");
 
-    // Initialize Redis connection manager
+    // Initialize Redis connection manager with retry resilience
     let redis_client = redis::Client::open(config.redis_url.clone()).map_err(|e| {
         error!(error = ?e, "Failed to open Redis client");
-        e
+        Box::new(e) as Box<dyn std::error::Error>
     })?;
 
-    let redis_conn = redis::aio::ConnectionManager::new(redis_client)
-        .await
-        .map_err(|e| {
-            error!(error = ?e, "Failed to establish Redis connection manager");
-            e
-        })?;
+    let mut redis_conn_opt = None;
+    for attempt in 1..=15 {
+        match redis::aio::ConnectionManager::new(redis_client.clone()).await {
+            Ok(conn) => {
+                redis_conn_opt = Some(conn);
+                break;
+            }
+            Err(e) => {
+                if attempt == 15 {
+                    error!(error = ?e, "Failed to establish Redis connection manager after multiple attempts");
+                    return Err(Box::<dyn std::error::Error>::from(e.to_string()));
+                }
+                info!(
+                    "Waiting for Redis to become ready (attempt {}/15)...",
+                    attempt
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            }
+        }
+    }
+    let redis_conn = redis_conn_opt.unwrap();
     info!("Connected to Redis instance");
 
     // Initialize optional NATS connection
@@ -113,11 +147,7 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {
-            info!("Received Ctrl+C, initiating graceful shutdown");
-        },
-        _ = terminate => {
-            info!("Received SIGTERM, initiating graceful shutdown");
-        },
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
 }
