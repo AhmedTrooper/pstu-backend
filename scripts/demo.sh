@@ -12,7 +12,7 @@ echo "============================================================"
 
 # 1. Register User A (Alice)
 echo -e "\n[1] Registering Alice (৳100,000 Seed Funding)..."
-ALICE_PHONE="01711$(shuf -i 100000..999999 -n 1)"
+ALICE_PHONE="01711$(shuf -i 100000-999999 -n 1)"
 ALICE_REG=$(curl -s -X POST "$API_URL/auth/register" \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"Alice Rahman\",\"phone\":\"$ALICE_PHONE\",\"password\":\"Str0ngP@ssword123\",\"pin\":\"12345\"}")
@@ -21,7 +21,7 @@ ALICE_ACC=$(echo "$ALICE_REG" | grep -o '"account_number":"[^"]*' | cut -d'"' -f
 
 # 2. Register User B (Bob)
 echo -e "\n[2] Registering Bob (৳100,000 Seed Funding)..."
-BOB_PHONE="01811$(shuf -i 100000..999999 -n 1)"
+BOB_PHONE="01811$(shuf -i 100000-999999 -n 1)"
 BOB_REG=$(curl -s -X POST "$API_URL/auth/register" \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"Bob Ahmed\",\"phone\":\"$BOB_PHONE\",\"password\":\"Str0ngP@ssword456\",\"pin\":\"54321\"}")
