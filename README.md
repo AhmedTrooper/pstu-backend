@@ -47,10 +47,10 @@ We selected **Rust + Axum** over alternatives like Python/FastAPI for mission-cr
 - [x] **T09**: Automated test suite for registration validation, duplicate phone conflict, and unauthenticated access (C08, C09, C10).
 
 ### Phase 2: Transfers & Money Movement Engine
-- [ ] **T11**: `POST /transfers` (P6, Workflow W2) with ascending `user_id` `SELECT ... FOR UPDATE` deadlock-free locking, atomic double-entry ledger rows, and versioned balance updates.
-- [ ] **T12**: Recipient phone/account number resolution.
+- [x] **T11**: `POST /transfers` (P6, Workflow W2) with ascending `user_id` `SELECT ... FOR UPDATE` deadlock-free locking, atomic double-entry ledger rows, and versioned balance updates.
+- [x] **T12**: Recipient phone/account number/UUID resolution.
+- [x] **T14**: Asynchronous transaction event notification pipeline via NATS JetStream event publishing.
 - [ ] **T13**: High-concurrency race condition tests (N=20 simultaneous transfers, no overdrafts, C05).
-- [ ] **T14**: Asynchronous transaction event notification pipeline via NATS / Redis Streams.
 
 ### Phase 3: Transaction History & Keyset Pagination
 - [ ] **T15**: `GET /me/transactions` (P5) with keyset cursor pagination, status filters (`completed`, `rejected`, `flagged`), and date range queries.
