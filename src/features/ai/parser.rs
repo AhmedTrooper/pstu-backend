@@ -3,6 +3,9 @@ use crate::features::ai::dto::{AIIntentDto, AIParseResponse};
 use regex::Regex;
 use std::sync::LazyLock;
 
+static PIN_STRIP_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\b(?:pin|পিন)\s*[:#]?\s*\d{4,6}\b").expect("valid regex"));
+
 static LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:create|make|generate).{0,20}?(?:link|payment link).{0,30}?(\d+(?:\.\d{1,2})?)\s*(?:bdt|taka|tk|৳)?").expect("valid regex")
 });
@@ -48,8 +51,17 @@ fn parse_natural_taka_to_paisa(s: &str) -> Option<Paisa> {
 
 #[allow(clippy::collapsible_if)]
 pub fn parse_intent(text: &str) -> AIParseResponse {
-    let trimmed = text.trim();
     let mut flags = Vec::new();
+
+    // Pre-step: strip PIN tokens and flag (R10, R17, C48)
+    let cleaned_text = if PIN_STRIP_REGEX.is_match(text) {
+        flags.push("pin_via_text_ignored".to_string());
+        PIN_STRIP_REGEX.replace_all(text, "").to_string()
+    } else {
+        text.to_string()
+    };
+
+    let trimmed = cleaned_text.trim();
 
     // Check for vague relative dates (C32)
     if trimmed.to_lowercase().contains("tomorrow") || trimmed.to_lowercase().contains("next week") {
