@@ -39,6 +39,7 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "dotenvy",
+ "hex",
  "metrics",
  "metrics-exporter-prometheus",
  "parking_lot",
