@@ -2,10 +2,36 @@
 **/*.rs.bk
 *.pdb
 
-# Environment variables
+# Environment variables & secrets
 .env
 .env.*
 !.env.example
+
+# Runtime, logs & temp data
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# Local container data volumes if mounted
+pgdata/
+redisdata/
+natsdata/
+promdata/
+grafanadata/
+
+# Database artifacts
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Test & coverage artifacts
+tarpaulin-report.html
+cobertura.xml
+lcov.info
 
 # Editor / IDE
 .idea/

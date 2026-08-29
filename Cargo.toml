@@ -4,3 +4,32 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+argon2 = "0.6.0"
+async-nats = "0.50.0"
+aws-config = "1.11.0"
+aws-sdk-s3 = "1.144.0"
+axum = "0.8.9"
+axum-extra = { version = "0.12.6", features = ["cookie", "typed-header", "query"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+crossbeam-channel = "0.5.16"
+dotenvy = "0.15.7"
+metrics = "0.24.6"
+metrics-exporter-prometheus = "0.18.3"
+parking_lot = "0.12.5"
+password-hash = "0.6.1"
+rand = "0.10.2"
+redis = { version = "1.6.0", features = ["tokio-comp", "connection-manager", "aio"] }
+regex = "1.13.1"
+rig-core = "0.42.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json", "migrate"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+tower = { version = "0.5.3", features = ["util", "timeout"] }
+tower-cookies = "0.11.0"
+tower-http = { version = "0.7.0", features = ["trace", "cors", "request-id", "timeout", "catch-panic"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+uuid = { version = "1.26.0", features = ["v4", "serde", "v7"] }
+validator = { version = "0.21.0", features = ["derive"] }
