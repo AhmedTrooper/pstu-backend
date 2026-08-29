@@ -22,7 +22,7 @@ pub async fn run_reconciliation(pool: &PgPool) -> Result<ReconcileReport, AppErr
         .await?;
 
     let total_balance: i64 =
-        sqlx::query_scalar("SELECT COALESCE(SUM(amount_paisa), 0) FROM balances")
+        sqlx::query_scalar("SELECT COALESCE(SUM(amount_paisa), 0)::BIGINT FROM balances")
             .fetch_one(pool)
             .await?;
 
