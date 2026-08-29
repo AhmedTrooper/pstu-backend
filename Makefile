@@ -1,4 +1,4 @@
-.PHONY: all build check fmt fmt-check clippy test api docker docker-down docker-erase reconcile demo
+.PHONY: all build check fmt fmt-check clippy test api docker docker-dev docker-down docker-erase reconcile demo
 
 all: check test
 
@@ -28,6 +28,9 @@ reconcile:
 
 demo:
 	./scripts/demo.sh
+
+docker-dev:
+	docker compose up -d postgres redis nats jaeger
 
 docker:
 	docker compose up -d --build
