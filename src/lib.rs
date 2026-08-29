@@ -38,7 +38,8 @@ pub fn build_app(state: AppState) -> Router {
         .merge(features::auth::routes::router())
         .merge(features::users::routes::router())
         .merge(features::transfers::routes::router())
-        .merge(features::history::routes::router());
+        .merge(features::history::routes::router())
+        .merge(features::requests::routes::router());
 
     Router::new()
         .merge(features::health::routes::router())
