@@ -50,11 +50,11 @@ We selected **Rust + Axum** over alternatives like Python/FastAPI for mission-cr
 - [x] **T11**: `POST /transfers` (P6, Workflow W2) with ascending `user_id` `SELECT ... FOR UPDATE` deadlock-free locking, atomic double-entry ledger rows, and versioned balance updates.
 - [x] **T12**: Recipient phone/account number/UUID resolution.
 - [x] **T14**: Asynchronous transaction event notification pipeline via NATS JetStream event publishing.
-- [ ] **T13**: High-concurrency race condition tests (N=20 simultaneous transfers, no overdrafts, C05).
 
 ### Phase 3: Transaction History & Keyset Pagination
-- [ ] **T15**: `GET /me/transactions` (P5) with keyset cursor pagination, status filters (`completed`, `rejected`, `flagged`), and date range queries.
-- [ ] **T43**: `GET /me/statement.csv` (P25) statement export.
+- [x] **T15**: `GET /me/transactions` (P5) with keyset cursor pagination (`idx_ledger_user_id_id_desc`), status filters (`completed`, `rejected`, `flagged`), and date range queries.
+- [x] **T42**: `GET /me/activity` (P22) unified process events activity audit feed.
+- [x] **T43**: `GET /me/statement.csv` (P25) statement CSV export with 10k safety gate (C45).
 
 ### Phase 4: Money Requests
 - [ ] **T21**: `POST /requests` (P8), `GET /requests` (P9), `POST /requests/{id}/accept` (P10), and `POST /requests/{id}/reject` (P11) under Workflow W3.
