@@ -46,7 +46,7 @@ pub struct MoneyRequestDto {
     pub id: Uuid,
     pub requester_id: Uuid,
     pub debtor_id: Uuid,
-    #[serde(alias = "amount")]
+    #[serde(rename = "amount", alias = "amount_paisa")]
     pub amount_paisa: String,
     pub note: String,
     pub status: String,

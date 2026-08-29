@@ -30,7 +30,7 @@ pub struct PaymentLinkDto {
     pub id: Uuid,
     pub token: String,
     pub url: String,
-    #[serde(alias = "amount")]
+    #[serde(rename = "amount", alias = "amount_paisa")]
     pub amount_paisa: String,
     pub note: String,
     #[serde(skip_serializing_if = "Option::is_none")]

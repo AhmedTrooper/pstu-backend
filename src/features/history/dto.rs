@@ -29,7 +29,7 @@ pub struct TransactionItemDto {
     pub kind: String,
     pub direction: String,
     pub status: String,
-    #[serde(alias = "amount")]
+    #[serde(rename = "amount", alias = "amount_paisa")]
     pub amount_paisa: String,
     #[serde(alias = "balance_after")]
     pub running_balance: String,
