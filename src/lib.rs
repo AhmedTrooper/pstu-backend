@@ -10,7 +10,7 @@ use axum::{
 use tower_cookies::CookieManagerLayer;
 use tower_http::{
     catch_panic::CatchPanicLayer,
-    cors::{AllowOrigin, Any, CorsLayer},
+    cors::{AllowOrigin, CorsLayer},
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     trace::TraceLayer,
 };
@@ -24,7 +24,8 @@ pub fn build_app(state: AppState) -> Router {
     let cors_cfg = state.config.cors_allowed_origins.trim();
     let cors = if cors_cfg == "*" || cors_cfg.is_empty() {
         CorsLayer::new()
-            .allow_origin(Any)
+            .allow_origin(AllowOrigin::mirror_request())
+            .allow_credentials(true)
             .allow_methods([
                 Method::GET,
                 Method::POST,
