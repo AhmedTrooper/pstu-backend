@@ -87,17 +87,26 @@ We selected **Rust + Axum** over alternatives like Python/FastAPI for mission-cr
 ## 🛠️ Developer Commands
 
 ```bash
-# Run API locally
+# 1. Spin up only dependencies (Postgres, Redis, NATS, Jaeger) without building containers
+make docker-dev
+
+# 2. Run API backend locally on host
 make api
+
+# 3. Run frontend (if needed)
+make web
+
+# Stop containers without erasing volumes
+make docker-down
+
+# Erase containers, networks, and volumes (preserves base images)
+make docker-erase
+
+# Run automated end-to-end workflow demo
+make demo
 
 # Run 3-contract double-entry ledger reconciliation
 make reconcile
-
-# Spin up complete Docker infrastructure
-make docker
-
-# Stop containers without erasing images/volumes
-make docker-down
 
 # Run all quality checks
 make check
