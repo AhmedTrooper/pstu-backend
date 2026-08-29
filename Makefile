@@ -1,4 +1,4 @@
-.PHONY: all build check fmt fmt-check clippy test api docker docker-dev docker-down docker-erase reconcile demo
+.PHONY: all build check fmt fmt-check clippy test api docker docker-dev docker-down docker-erase down-port reconcile demo
 
 all: check test
 
@@ -40,3 +40,6 @@ docker-down:
 
 docker-erase:
 	docker compose down -v --remove-orphans
+
+down-port:
+	./scripts/down_port.sh
