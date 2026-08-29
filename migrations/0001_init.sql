@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS ledger (
 -- Ledger Indexes (§14)
 CREATE INDEX IF NOT EXISTS idx_ledger_user_id_id_desc ON ledger (user_id, id DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_txn_direction ON ledger (txn_id, direction);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_idempotency_key ON ledger (idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_idempotency_key ON ledger (idempotency_key, direction) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ledger_created_at_brin ON ledger USING brin (created_at);
 
 -- 5. Money Requests Table (§2, §14)
