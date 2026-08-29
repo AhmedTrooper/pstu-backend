@@ -21,7 +21,7 @@ test:
 	cargo test
 
 api:
-	cargo run
+	cargo run --bin api
 
 reconcile:
 	cargo run --bin reconcile
