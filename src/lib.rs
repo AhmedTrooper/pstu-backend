@@ -92,6 +92,7 @@ pub fn build_app(state: AppState) -> Router {
     };
 
     let api_v1 = Router::new()
+        .merge(features::health::routes::router())
         .merge(features::auth::routes::router())
         .merge(features::users::routes::router())
         .merge(features::transfers::routes::router())
