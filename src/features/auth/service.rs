@@ -161,6 +161,16 @@ pub async fn register_user(
 
     tx.commit().await?;
 
+    // Asynchronous welcome email (W1, R22)
+    state.mailer.dispatch_email(
+        format!("{}@pstupay.local", phone_clean),
+        "Welcome to PSTU Pay".to_string(),
+        format!(
+            "Hello {},\n\nYour account {} has been created with initial seed funding of ৳100,000.\nFunding TrxID: {}\n\nThank you,\nPSTU Pay Team",
+            name_clean, account_number, funding_ref
+        ),
+    );
+
     info!(
         user_id = %user_id,
         account_number = %account_number,
@@ -446,6 +456,13 @@ pub async fn reset_pin(
         serde_json::json!({}),
     )
     .await;
+
+    // Asynchronous PIN reset notification (W13, R22)
+    state.mailer.dispatch_email(
+        format!("{}@pstupay.local", user_id),
+        "Security Alert: Transaction PIN Reset".to_string(),
+        "Your transaction PIN was recently reset using your account password. All secondary active sessions have been invalidated.\nIf you did not perform this action, please contact support immediately.".to_string(),
+    );
 
     Ok(PinUpdatedRes {
         ok: true,

@@ -1,6 +1,7 @@
 pub mod config;
 pub mod envelope;
 pub mod error;
+pub mod mail;
 pub mod money;
 pub mod pin;
 pub mod ratelimit;

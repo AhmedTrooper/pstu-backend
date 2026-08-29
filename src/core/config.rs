@@ -14,6 +14,11 @@ pub struct AppConfig {
     pub ai_provider: Option<String>,
     pub ai_api_key: Option<String>,
     pub ai_model: Option<String>,
+    pub smtp_host: Option<String>,
+    pub smtp_port: u16,
+    pub smtp_user: Option<String>,
+    pub smtp_password: Option<String>,
+    pub mail_from_email: Option<String>,
 }
 
 impl AppConfig {
@@ -60,6 +65,15 @@ impl AppConfig {
             .ok();
         let ai_model = env::var("AI_MODEL").ok();
 
+        let smtp_host = env::var("SMTP_HOST").ok();
+        let smtp_port = env::var("SMTP_PORT")
+            .unwrap_or_else(|_| "587".to_string())
+            .parse::<u16>()
+            .unwrap_or(587);
+        let smtp_user = env::var("SMTP_USER").ok();
+        let smtp_password = env::var("SMTP_PASSWORD").ok();
+        let mail_from_email = env::var("MAIL_FROM_EMAIL").ok();
+
         Ok(Self {
             host,
             port,
@@ -73,6 +87,11 @@ impl AppConfig {
             ai_provider,
             ai_api_key,
             ai_model,
+            smtp_host,
+            smtp_port,
+            smtp_user,
+            smtp_password,
+            mail_from_email,
         })
     }
 }

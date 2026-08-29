@@ -383,6 +383,16 @@ pub async fn accept_request(
 
     tx.commit().await?;
 
+    // Asynchronous request paid email (W3, R22)
+    state.mailer.dispatch_email(
+        format!("{}@pstupay.local", requester_id),
+        format!("Money Request Paid - {}", reference),
+        format!(
+            "Your money request of ৳{:.2} has been paid.\nTrxID: {}\nNote: {}\nThank you,\nPSTU Pay Team",
+            amount_paisa as f64 / 100.0, reference, note
+        ),
+    );
+
     let req_dto = MoneyRequestDto {
         id: request_id,
         requester_id,

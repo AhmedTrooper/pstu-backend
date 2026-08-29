@@ -1,4 +1,4 @@
-.PHONY: all build check fmt fmt-check clippy test api docker docker-down docker-erase reconcile
+.PHONY: all build check fmt fmt-check clippy test api docker docker-down docker-erase reconcile demo
 
 all: check test
 
@@ -25,6 +25,9 @@ api:
 
 reconcile:
 	cargo run --bin reconcile
+
+demo:
+	./scripts/demo.sh
 
 docker:
 	docker compose up -d --build

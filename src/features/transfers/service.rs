@@ -415,6 +415,16 @@ pub async fn process_transfer(
 
     tx.commit().await?;
 
+    // Asynchronous transfer notification email (W2, R22)
+    state.mailer.dispatch_email(
+        format!("{}@pstupay.local", sender_id),
+        format!("Debit Confirmation - {}", reference),
+        format!(
+            "Your transfer of ৳{:.2} has been processed successfully.\nTrxID: {}\nNote: {}\nThank you,\nPSTU Pay Team",
+            amount.0 as f64 / 100.0, reference, note
+        ),
+    );
+
     // 14. Asynchronous notification fanout (T14)
     if let Some(nats) = &state.nats {
         let event_payload = serde_json::json!({

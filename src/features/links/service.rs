@@ -454,6 +454,17 @@ pub async fn claim_link(
 
     tx.commit().await?;
 
+    // Asynchronous link claimed email (W5, R22)
+    state.mailer.dispatch_email(
+        format!("{}@pstupay.local", creator_id),
+        format!("Payment Link Claimed - {}", reference),
+        format!(
+            "Your payment link for ৳{:.2} has been claimed.\nTrxID: {}\nThank you,\nPSTU Pay Team",
+            amount_paisa as f64 / 100.0,
+            reference
+        ),
+    );
+
     let transfer_dto = TransferResponse {
         id: transfer_id,
         reference,
