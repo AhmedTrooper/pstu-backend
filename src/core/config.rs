@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub session_ttl_secs: u64,
     pub default_link_ttl_secs: u64,
     pub max_body_size_bytes: usize,
+    pub cors_allowed_origins: String,
     pub ai_provider: Option<String>,
     pub ai_api_key: Option<String>,
     pub ai_model: Option<String>,
@@ -49,6 +50,10 @@ impl AppConfig {
             .parse::<usize>()
             .unwrap_or(1048576);
 
+        let cors_allowed_origins = env::var("CORS_ALLOWED_ORIGINS")
+            .or_else(|_| env::var("CORS_ALLOW_ORIGIN"))
+            .unwrap_or_else(|_| "*".to_string());
+
         let ai_provider = env::var("AI_PROVIDER").ok();
         let ai_api_key = env::var("AI_API_KEY")
             .or_else(|_| env::var("OPENAI_API_KEY"))
@@ -64,6 +69,7 @@ impl AppConfig {
             session_ttl_secs,
             default_link_ttl_secs,
             max_body_size_bytes,
+            cors_allowed_origins,
             ai_provider,
             ai_api_key,
             ai_model,

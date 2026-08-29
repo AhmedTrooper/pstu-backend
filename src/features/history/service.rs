@@ -18,29 +18,19 @@ pub async fn get_transactions(
     user_id: Uuid,
     query: TransactionHistoryQuery,
 ) -> Result<PaginatedTransactionsResponse, AppError> {
-    // Validate direction enum if provided
-    if matches!(query.direction, Some(dir) if dir != -1 && dir != 1) {
+    // Validate direction filter if provided
+    if matches!(query.direction.as_deref(), Some(d) if d != "sent" && d != "received" && d != "-1" && d != "1")
+    {
         return Err(AppError::BadRequest(
-            "Invalid direction filter: must be -1 (sent) or 1 (received)".to_string(),
+            "Invalid direction filter: must be 'sent' or 'received'".to_string(),
         ));
     }
 
-    // Validate kind enum if provided
-    if let Some(ref k) = query.kind {
-        let valid_kinds = [
-            "funding",
-            "transfer_sent",
-            "transfer_received",
-            "request_paid",
-            "link_paid",
-        ];
-        if !valid_kinds.contains(&k.as_str()) {
-            return Err(AppError::BadRequest(format!(
-                "Invalid kind filter: '{}'",
-                k
-            )));
-        }
-    }
+    let dir_normalized = query.direction.as_deref().map(|d| match d {
+        "-1" | "sent" => "sent",
+        "1" | "received" => "received",
+        other => other,
+    });
 
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let fetch_limit = limit + 1;
@@ -65,33 +55,30 @@ pub async fn get_transactions(
         None
     };
 
-    // Primary index query on idx_ledger_user_id_id_desc (§14)
+    // Primary index query on tx_history table (§2, §14)
     let rows = sqlx::query(
         r#"
-        SELECT l.id, l.txn_id, l.kind, l.direction, l.amount_paisa, l.running_balance, l.created_at,
-               COALESCE(t.status, 'completed') as status,
-               COALESCE(t.note, '') as note,
+        SELECT th.id, th.reference, th.kind, th.direction, th.status, th.amount_paisa, th.balance_after, th.note, th.created_at,
                u.name as counterparty_name, u.account_number as counterparty_account
-        FROM ledger l
-        LEFT JOIN transfers t ON t.id = l.txn_id
-        LEFT JOIN users u ON u.id = l.counterparty_id
-        WHERE l.user_id = $1
-          AND ($2::bigint IS NULL OR l.id < $2)
-          AND ($3::smallint IS NULL OR l.direction = $3)
-          AND ($4::text IS NULL OR l.kind = $4)
-          AND ($5::text IS NULL OR COALESCE(t.status, 'completed') = $5)
-          AND ($6::timestamptz IS NULL OR l.created_at >= $6)
-          AND ($7::timestamptz IS NULL OR l.created_at <= $7)
-          AND ($8::bigint IS NULL OR l.amount_paisa >= $8)
-          AND ($9::bigint IS NULL OR l.amount_paisa <= $9)
-          AND ($10::text IS NULL OR u.name ILIKE '%' || $10 || '%' OR u.phone = $10 OR u.account_number = $10)
-        ORDER BY l.id DESC
+        FROM tx_history th
+        LEFT JOIN users u ON u.id = th.counterparty_id
+        WHERE th.user_id = $1
+          AND ($2::bigint IS NULL OR th.id < $2)
+          AND ($3::text IS NULL OR th.direction = $3)
+          AND ($4::text IS NULL OR th.kind = $4)
+          AND ($5::text IS NULL OR th.status = $5)
+          AND ($6::timestamptz IS NULL OR th.created_at >= $6)
+          AND ($7::timestamptz IS NULL OR th.created_at <= $7)
+          AND ($8::bigint IS NULL OR th.amount_paisa >= $8)
+          AND ($9::bigint IS NULL OR th.amount_paisa <= $9)
+          AND ($10::text IS NULL OR th.reference ILIKE $10 || '%' OR u.name ILIKE '%' || $10 || '%' OR u.phone = $10 OR u.account_number = $10)
+        ORDER BY th.id DESC
         LIMIT $11
         "#,
     )
     .bind(user_id)
     .bind(query.cursor)
-    .bind(query.direction)
+    .bind(dir_normalized)
     .bind(query.kind)
     .bind(query.status)
     .bind(query.from)
@@ -117,12 +104,12 @@ pub async fn get_transactions(
 
         items.push(TransactionItemDto {
             id: row.get("id"),
-            txn_id: row.get("txn_id"),
+            reference: row.get("reference"),
             kind: row.get("kind"),
             direction: row.get("direction"),
             status: row.get("status"),
             amount_paisa: row.get::<i64, _>("amount_paisa").to_string(),
-            running_balance: row.get::<i64, _>("running_balance").to_string(),
+            running_balance: row.get::<i64, _>("balance_after").to_string(),
             counterparty,
             note: row.get("note"),
             created_at: row.get("created_at"),
@@ -145,14 +132,15 @@ pub async fn generate_statement_csv(
 ) -> Result<String, AppError> {
     let rows = sqlx::query(
         r#"
-        SELECT l.id, l.txn_id, l.kind, l.direction, l.amount_paisa, l.running_balance, l.created_at,
+        SELECT th.reference, th.kind, th.direction, th.amount_paisa, th.balance_after, th.created_at,
                u.name as counterparty_name, u.account_number as counterparty_account
-        FROM ledger l
-        LEFT JOIN users u ON u.id = l.counterparty_id
-        WHERE l.user_id = $1
-          AND ($2::timestamptz IS NULL OR l.created_at >= $2)
-          AND ($3::timestamptz IS NULL OR l.created_at <= $3)
-        ORDER BY l.id ASC
+        FROM tx_history th
+        LEFT JOIN users u ON u.id = th.counterparty_id
+        WHERE th.user_id = $1
+          AND th.status = 'completed'
+          AND ($2::timestamptz IS NULL OR th.created_at >= $2)
+          AND ($3::timestamptz IS NULL OR th.created_at <= $3)
+        ORDER BY th.id ASC
         LIMIT 10001
         "#,
     )
@@ -169,36 +157,34 @@ pub async fn generate_statement_csv(
         ));
     }
 
-    let mut csv_output = String::from(
-        "id,txn_id,kind,direction,amount_paisa,running_balance,counterparty_name,counterparty_account,created_at\n",
-    );
+    let mut csv_output =
+        String::from("reference,created_at,kind,direction,amount,running_balance,counterparty\n");
 
     for r in rows {
-        let id: i64 = r.get("id");
-        let txn_id: Uuid = r.get("txn_id");
+        let reference: String = r.get("reference");
         let kind: String = r.get("kind");
-        let direction: i16 = r.get("direction");
+        let direction: String = r.get("direction");
         let amount_paisa: i64 = r.get("amount_paisa");
-        let running_balance: i64 = r.get("running_balance");
-        let counterparty_name: String = r
-            .get::<Option<String>, _>("counterparty_name")
-            .unwrap_or_default();
-        let counterparty_account: String = r
-            .get::<Option<String>, _>("counterparty_account")
-            .unwrap_or_default();
+        let running_balance: i64 = r.get("balance_after");
+        let counterparty_name: Option<String> = r.get("counterparty_name");
+        let counterparty_account: Option<String> = r.get("counterparty_account");
         let created_at: chrono::DateTime<chrono::Utc> = r.get("created_at");
 
+        let counterparty_display = match (counterparty_name, counterparty_account) {
+            (Some(name), Some(acc)) => format!("{} ({})", name, acc),
+            (Some(name), None) => name,
+            _ => String::new(),
+        };
+
         csv_output.push_str(&format!(
-            "{},{},{},{},{},{},\"{}\",\"{}\",{}\n",
-            id,
-            txn_id,
+            "{},{},{},{},{},{},\"{}\"\n",
+            reference,
+            created_at.to_rfc3339(),
             kind,
             direction,
             amount_paisa,
             running_balance,
-            counterparty_name,
-            counterparty_account,
-            created_at.to_rfc3339()
+            counterparty_display
         ));
     }
 

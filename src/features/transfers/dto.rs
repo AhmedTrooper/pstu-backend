@@ -9,11 +9,15 @@ pub struct CreateTransferRequest {
     #[validate(length(min = 1, message = "recipient identifier cannot be empty"))]
     pub recipient: String,
 
-    #[validate(length(min = 1, message = "amount_paisa cannot be empty"))]
+    #[serde(alias = "amount")]
+    #[validate(length(min = 1, message = "amount cannot be empty"))]
     pub amount_paisa: String,
 
     #[validate(length(max = 200, message = "note cannot exceed 200 characters"))]
     pub note: Option<String>,
+
+    #[validate(regex(path = *crate::core::money::PIN_REGEX, message = "PIN must be 4 to 6 digits"))]
+    pub pin: String,
 
     pub idempotency_key: Uuid,
 }
@@ -21,8 +25,10 @@ pub struct CreateTransferRequest {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TransferResponse {
     pub id: Uuid,
+    pub reference: String,
     pub sender_id: Uuid,
     pub recipient_id: Uuid,
+    #[serde(alias = "amount")]
     pub amount_paisa: String,
     pub note: String,
     pub status: String,

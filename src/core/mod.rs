@@ -1,5 +1,9 @@
 pub mod config;
+pub mod envelope;
 pub mod error;
 pub mod money;
+pub mod pin;
+pub mod ratelimit;
+pub mod reference;
 pub mod state;
 pub mod telemetry;

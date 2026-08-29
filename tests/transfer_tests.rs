@@ -1,4 +1,5 @@
 use api::core::money::Paisa;
+use api::core::reference::generate_trx_reference;
 use api::features::transfers::dto::CreateTransferRequest;
 use uuid::Uuid;
 use validator::Validate;
@@ -17,6 +18,7 @@ fn test_c02_transfer_request_validation() {
         "recipient": "01711000000",
         "amount_paisa": "100000",
         "note": "Payment for services",
+        "pin": "1234",
         "idempotency_key": Uuid::new_v4()
     });
 
@@ -37,11 +39,19 @@ fn test_c07_idempotency_key_requires_exact_payload_match() {
     let recipient2 = Uuid::new_v4();
     let amount = 50000i64;
 
-    // Simulating matching vs non-matching payload checks
     assert_ne!(recipient1, recipient2);
     let matches = sender == sender && recipient1 == recipient2 && amount == amount;
     assert!(
         !matches,
         "Mismatching recipients must be detected for 409 Conflict"
     );
+}
+
+#[test]
+fn test_c52_reference_generation_crockford_format() {
+    let ref1 = generate_trx_reference();
+    let ref2 = generate_trx_reference();
+    assert_ne!(ref1, ref2);
+    assert!(ref1.starts_with("TRX"));
+    assert_eq!(ref1.len(), 13);
 }

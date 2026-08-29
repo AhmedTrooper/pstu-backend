@@ -25,6 +25,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/requests/{id}/accept", post(accept_request_handler))
         .route("/requests/{id}/reject", post(reject_request_handler))
+        .route("/requests/{id}/cancel", post(cancel_request_handler))
         .route("/requests/{id}/events", get(get_request_events_handler))
 }
 
@@ -70,6 +71,9 @@ async fn accept_request_handler(
     Path(id): Path<Uuid>,
     Json(payload): Json<AcceptMoneyRequest>,
 ) -> Result<Json<AcceptRequestResponse>, AppError> {
+    payload
+        .validate()
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let res = service::accept_request(&state, auth_user.user_id, id, payload).await?;
     Ok(Json(res))
 }
@@ -80,6 +84,15 @@ async fn reject_request_handler(
     Path(id): Path<Uuid>,
 ) -> Result<Json<MoneyRequestDto>, AppError> {
     let res = service::reject_request(&state, auth_user.user_id, id).await?;
+    Ok(Json(res))
+}
+
+async fn cancel_request_handler(
+    State(state): State<AppState>,
+    auth_user: AuthenticatedUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<MoneyRequestDto>, AppError> {
+    let res = service::cancel_request(&state, auth_user.user_id, id).await?;
     Ok(Json(res))
 }
 

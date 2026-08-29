@@ -8,7 +8,7 @@ pub struct UserProfileResponse {
     pub name: String,
     pub phone: String,
     pub account_number: String,
-    pub balance_paisa: String,
+    pub balance: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -23,4 +23,10 @@ pub struct UserLookupDto {
     pub name: String,
     pub account_number: String,
     pub phone: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PublicUserRes {
+    pub name: String,
+    pub account_number: String,
 }

@@ -22,6 +22,9 @@ pub struct RegisterRequest {
 
     #[validate(length(min = 8, max = 128, message = "password must be at least 8 characters"))]
     pub password: String,
+
+    #[validate(regex(path = *crate::core::money::PIN_REGEX, message = "PIN must be 4 to 6 digits"))]
+    pub pin: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,7 +33,7 @@ pub struct RegisterResponse {
     pub account_number: String,
     pub name: String,
     pub phone: String,
-    pub balance_paisa: String,
+    pub balance: String,
     pub created_at: DateTime<Utc>,
 }
 
@@ -56,10 +59,32 @@ pub struct UserDto {
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
     pub user: UserDto,
-    pub balance_paisa: String,
+    pub balance: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct LogoutResponse {
     pub ok: bool,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct PinChangeReq {
+    pub current_pin: String,
+    #[validate(regex(path = *crate::core::money::PIN_REGEX, message = "new PIN must be 4 to 6 digits"))]
+    pub new_pin: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(deny_unknown_fields)]
+pub struct PinResetReq {
+    pub password: String,
+    #[validate(regex(path = *crate::core::money::PIN_REGEX, message = "new PIN must be 4 to 6 digits"))]
+    pub new_pin: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PinUpdatedRes {
+    pub ok: bool,
+    pub pin_updated_at: DateTime<Utc>,
 }

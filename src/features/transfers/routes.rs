@@ -1,4 +1,5 @@
 use crate::core::error::AppError;
+use crate::core::ratelimit::enforce_rate_limit;
 use crate::core::state::AppState;
 use crate::features::auth::middleware::AuthenticatedUser;
 use crate::features::events::model::ProcessEventDto;
@@ -27,6 +28,9 @@ async fn create_transfer_handler(
     auth_user: AuthenticatedUser,
     Json(payload): Json<CreateTransferRequest>,
 ) -> Result<Response, AppError> {
+    // Enforce 30 transfers/minute rate limit per user (R13, T31)
+    enforce_rate_limit(&state, "transfers", &auth_user.user_id.to_string(), 30, 60).await?;
+
     if let Err(val_err) = payload.validate() {
         let mut fields = HashMap::new();
         for (field, errors) in val_err.field_errors() {

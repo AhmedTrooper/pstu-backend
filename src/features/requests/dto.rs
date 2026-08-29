@@ -9,7 +9,8 @@ pub struct CreateMoneyRequest {
     #[validate(length(min = 1, message = "debtor identifier cannot be empty"))]
     pub debtor: String,
 
-    #[validate(length(min = 1, message = "amount_paisa cannot be empty"))]
+    #[serde(alias = "amount")]
+    #[validate(length(min = 1, message = "amount cannot be empty"))]
     pub amount_paisa: String,
 
     #[validate(length(max = 200, message = "note cannot exceed 200 characters"))]
@@ -19,13 +20,16 @@ pub struct CreateMoneyRequest {
 #[derive(Debug, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct AcceptMoneyRequest {
+    #[validate(regex(path = *crate::core::money::PIN_REGEX, message = "PIN must be 4 to 6 digits"))]
+    pub pin: String,
+
     pub idempotency_key: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct GetRequestsQuery {
     pub status: Option<String>,
-    pub role: Option<String>, // "incoming" or "outgoing"
+    pub role: Option<String>, // "debtor", "requester", "incoming", "outgoing", "all"
     pub cursor: Option<DateTime<Utc>>,
     pub limit: Option<i64>,
 }
@@ -42,12 +46,15 @@ pub struct MoneyRequestDto {
     pub id: Uuid,
     pub requester_id: Uuid,
     pub debtor_id: Uuid,
+    #[serde(alias = "amount")]
     pub amount_paisa: String,
     pub note: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub resolved_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub requester: Option<CounterpartyDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub debtor: Option<CounterpartyDto>,
 }
 

@@ -1,17 +1,14 @@
 use crate::core::error::AppError;
 use crate::core::state::AppState;
-use crate::features::auth::dto::{LoginRequest, LogoutResponse, RegisterRequest, RegisterResponse};
-use crate::features::auth::middleware::{AuthenticatedUser, SESSION_COOKIE_NAME};
-use crate::features::auth::service;
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::post,
+use crate::features::auth::dto::{
+    LoginRequest, LoginResponse, LogoutResponse, PinChangeReq, PinResetReq, PinUpdatedRes,
+    RegisterRequest, RegisterResponse,
 };
+use crate::features::auth::middleware::AuthenticatedUser;
+use crate::features::auth::service;
+use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use std::collections::HashMap;
-use tower_cookies::{Cookie, Cookies};
+use tower_cookies::Cookies;
 use validator::Validate;
 
 pub fn router() -> Router<AppState> {
@@ -19,6 +16,8 @@ pub fn router() -> Router<AppState> {
         .route("/auth/register", post(register_handler))
         .route("/auth/login", post(login_handler))
         .route("/auth/logout", post(logout_handler))
+        .route("/me/pin/change", post(change_pin_handler))
+        .route("/me/pin/reset", post(reset_pin_handler))
 }
 
 async fn register_handler(
@@ -38,12 +37,12 @@ async fn register_handler(
             }
         }
         return Err(AppError::Validation {
-            message: "Validation failed on registration fields".to_string(),
+            message: "Validation failed on user registration".to_string(),
             fields,
         });
     }
 
-    let res = service::register(&state, payload).await?;
+    let res = service::register_user(&state, payload).await?;
     Ok((StatusCode::CREATED, Json(res)))
 }
 
@@ -51,7 +50,7 @@ async fn login_handler(
     State(state): State<AppState>,
     cookies: Cookies,
     Json(payload): Json<LoginRequest>,
-) -> Result<Response, AppError> {
+) -> Result<Json<LoginResponse>, AppError> {
     if let Err(val_err) = payload.validate() {
         let mut fields = HashMap::new();
         for (field, errors) in val_err.field_errors() {
@@ -65,37 +64,45 @@ async fn login_handler(
             }
         }
         return Err(AppError::Validation {
-            message: "Validation failed on login fields".to_string(),
+            message: "Validation failed on login".to_string(),
             fields,
         });
     }
 
-    let (res, session_token) = service::login(&state, payload).await?;
-
-    let mut cookie = Cookie::new(SESSION_COOKIE_NAME, session_token);
-    cookie.set_path("/");
-    cookie.set_http_only(true);
-    cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
-    cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(
-        state.config.session_ttl_secs as i64,
-    ));
-    cookies.add(cookie);
-
-    Ok((StatusCode::OK, Json(res)).into_response())
+    let res = service::login_user(&state, payload, &cookies).await?;
+    Ok(Json(res))
 }
 
 async fn logout_handler(
     State(state): State<AppState>,
-    cookies: Cookies,
     auth_user: AuthenticatedUser,
+    cookies: Cookies,
 ) -> Result<Json<LogoutResponse>, AppError> {
-    service::logout(&state, auth_user.user_id, &auth_user.session_token).await?;
+    let res = service::logout_user(&state, auth_user.user_id, &cookies).await?;
+    Ok(Json(res))
+}
 
-    let mut cookie = Cookie::new(SESSION_COOKIE_NAME, "");
-    cookie.set_path("/");
-    cookie.set_http_only(true);
-    cookie.set_max_age(tower_cookies::cookie::time::Duration::seconds(0));
-    cookies.add(cookie);
+async fn change_pin_handler(
+    State(state): State<AppState>,
+    auth_user: AuthenticatedUser,
+    Json(payload): Json<PinChangeReq>,
+) -> Result<Json<PinUpdatedRes>, AppError> {
+    payload
+        .validate()
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let res = service::change_pin(&state, auth_user.user_id, payload).await?;
+    Ok(Json(res))
+}
 
-    Ok(Json(LogoutResponse { ok: true }))
+async fn reset_pin_handler(
+    State(state): State<AppState>,
+    auth_user: AuthenticatedUser,
+    cookies: Cookies,
+    Json(payload): Json<PinResetReq>,
+) -> Result<Json<PinUpdatedRes>, AppError> {
+    payload
+        .validate()
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let res = service::reset_pin(&state, auth_user.user_id, payload, &cookies).await?;
+    Ok(Json(res))
 }

@@ -1,5 +1,7 @@
 use crate::core::error::AppError;
 use crate::core::money::Paisa;
+use crate::core::pin::enforce_user_pin;
+use crate::core::reference::generate_trx_reference;
 use crate::core::state::AppState;
 use crate::features::events::model::ProcessEventDto;
 use crate::features::events::service::log_event_txn;
@@ -9,7 +11,6 @@ use crate::features::transfers::dto::{
 use chrono::Utc;
 use redis::AsyncCommands;
 use sqlx::Row;
-use std::str::FromStr;
 use tracing::info;
 use uuid::Uuid;
 
@@ -18,27 +19,7 @@ pub const PER_TRANSFER_CAP_PAISA: i64 = 5_000_000; // ৳50,000 max single trans
 pub const DAILY_OUTFLOW_CAP_PAISA: i64 = 20_000_000; // ৳200,000 max daily transfer
 
 pub async fn resolve_recipient(state: &AppState, identifier: &str) -> Result<Uuid, AppError> {
-    let trimmed = identifier.trim();
-
-    // 1. Try parsing as UUID
-    if let Ok(id) = Uuid::from_str(trimmed) {
-        let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM users WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&state.db)
-            .await?;
-        if let Some(user_id) = exists {
-            return Ok(user_id);
-        }
-    }
-
-    // 2. Try lookup by phone or account_number
-    let user_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM users WHERE phone = $1 OR account_number = $1")
-            .bind(trimmed)
-            .fetch_optional(&state.db)
-            .await?;
-
-    user_id.ok_or_else(|| AppError::NotFound("Recipient not found".to_string()))
+    crate::features::users::service::resolve_recipient_user(state, identifier).await
 }
 
 pub async fn process_transfer(
@@ -46,14 +27,17 @@ pub async fn process_transfer(
     sender_id: Uuid,
     req: CreateTransferRequest,
 ) -> Result<(TransferResponse, bool), AppError> {
-    // 1. Parse and validate amount (R1, C02, C13, C18)
+    // 1. Enforce transaction PIN verification (R17, C46, C47)
+    enforce_user_pin(state, sender_id, &req.pin).await?;
+
+    // 2. Parse and validate amount (R1, C02, C13, C18)
     let amount = Paisa::parse_positive_from_str(&req.amount_paisa)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
 
-    // 2. Resolve recipient (T12, C03)
+    // 3. Resolve recipient (T12, C03, C59)
     let recipient_id = resolve_recipient(state, &req.recipient).await?;
 
-    // 3. Self-transfer check (C01)
+    // 4. Self-transfer check (C01)
     if sender_id == recipient_id {
         return Err(AppError::BadRequest(
             "Self transfers are not permitted".to_string(),
@@ -62,10 +46,10 @@ pub async fn process_transfer(
 
     let note = req.note.unwrap_or_default().trim().to_string();
 
-    // 4. Permanent Idempotency Key Check (R4, C06, C07, C34)
+    // 5. Permanent Idempotency Key Check (R4, C06, C07, C34)
     let existing_row = sqlx::query(
         r#"
-        SELECT id, sender_id, recipient_id, amount_paisa, note, status, created_at
+        SELECT id, reference, sender_id, recipient_id, amount_paisa, note, status, created_at
         FROM transfers
         WHERE idempotency_key = $1
         "#,
@@ -83,6 +67,7 @@ pub async fn process_transfer(
         if ex_sender == sender_id && ex_recipient == recipient_id && ex_amount == amount.0 {
             let resp = TransferResponse {
                 id: row.get("id"),
+                reference: row.get("reference"),
                 sender_id: ex_sender,
                 recipient_id: ex_recipient,
                 amount_paisa: ex_amount.to_string(),
@@ -90,30 +75,56 @@ pub async fn process_transfer(
                 status: row.get("status"),
                 created_at: row.get("created_at"),
             };
-            return Ok((resp, true)); // true indicates idempotent replay
+            return Ok((resp, true));
         } else {
-            // Same key with different payload -> 409 Conflict (C07)
             return Err(AppError::Conflict(
                 "Idempotency key was previously used with different parameters".to_string(),
             ));
         }
     }
 
-    // 5. Per-Transfer Cap Check (R13, C35)
+    let reference = generate_trx_reference();
+
+    // 6. Per-Transfer Cap Check (R13, C35)
     if amount.0 > PER_TRANSFER_CAP_PAISA {
         let transfer_id = Uuid::new_v4();
         let mut tx = state.db.begin().await?;
 
         sqlx::query(
             r#"
-            INSERT INTO transfers (id, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
-            VALUES ($1, $2, $3, $4, $5, 'rejected', $6, now())
+            INSERT INTO transfers (id, reference, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'rejected', $7, now())
             "#,
         )
         .bind(transfer_id)
+        .bind(&reference)
         .bind(sender_id)
         .bind(recipient_id)
         .bind(amount.0)
+        .bind(&note)
+        .bind(req.idempotency_key)
+        .execute(&mut *tx)
+        .await?;
+
+        // tx_history rejected row (§2, W2)
+        let sender_bal: i64 =
+            sqlx::query_scalar("SELECT amount_paisa FROM balances WHERE user_id = $1")
+                .bind(sender_id)
+                .fetch_one(&mut *tx)
+                .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO tx_history (user_id, status, kind, direction, amount_paisa, balance_after, counterparty_id, reference, entity_id, note, idempotency_key, created_at)
+            VALUES ($1, 'rejected', 'transfer', 'sent', $2, $3, $4, $5, $6, $7, $8, now())
+            "#,
+        )
+        .bind(sender_id)
+        .bind(amount.0)
+        .bind(sender_bal)
+        .bind(recipient_id)
+        .bind(&reference)
+        .bind(transfer_id)
         .bind(&note)
         .bind(req.idempotency_key)
         .execute(&mut *tx)
@@ -138,7 +149,7 @@ pub async fn process_transfer(
         )));
     }
 
-    // 6. Daily Outflow Velocity Cap Check (R13, W10, C36)
+    // 7. Daily Outflow Velocity Cap Check (R13, W10, C36)
     let today = Utc::now().format("%Y%m%d").to_string();
     let velocity_key = format!("daily_outflow:{}:{}", sender_id, today);
     let mut redis_conn = state.redis.clone();
@@ -152,14 +163,38 @@ pub async fn process_transfer(
 
         sqlx::query(
             r#"
-            INSERT INTO transfers (id, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
-            VALUES ($1, $2, $3, $4, $5, 'flagged', $6, now())
+            INSERT INTO transfers (id, reference, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'flagged', $7, now())
             "#,
         )
         .bind(transfer_id)
+        .bind(&reference)
         .bind(sender_id)
         .bind(recipient_id)
         .bind(amount.0)
+        .bind(&note)
+        .bind(req.idempotency_key)
+        .execute(&mut *tx)
+        .await?;
+
+        let sender_bal: i64 =
+            sqlx::query_scalar("SELECT amount_paisa FROM balances WHERE user_id = $1")
+                .bind(sender_id)
+                .fetch_one(&mut *tx)
+                .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO tx_history (user_id, status, kind, direction, amount_paisa, balance_after, counterparty_id, reference, entity_id, note, idempotency_key, created_at)
+            VALUES ($1, 'flagged', 'transfer', 'sent', $2, $3, $4, $5, $6, $7, $8, now())
+            "#,
+        )
+        .bind(sender_id)
+        .bind(amount.0)
+        .bind(sender_bal)
+        .bind(recipient_id)
+        .bind(&reference)
+        .bind(transfer_id)
         .bind(&note)
         .bind(req.idempotency_key)
         .execute(&mut *tx)
@@ -180,6 +215,7 @@ pub async fn process_transfer(
 
         let resp = TransferResponse {
             id: transfer_id,
+            reference,
             sender_id,
             recipient_id,
             amount_paisa: amount.0.to_string(),
@@ -191,7 +227,7 @@ pub async fn process_transfer(
         return Ok((resp, false));
     }
 
-    // 7. Atomic Transaction with Deadlock-Free Ascending Lock Order (R5, W2)
+    // 8. Atomic Transaction with Deadlock-Free Ascending Lock Order (R5, W2)
     let mut tx = state.db.begin().await?;
 
     let (first_id, second_id) = if sender_id < recipient_id {
@@ -200,7 +236,6 @@ pub async fn process_transfer(
         (recipient_id, sender_id)
     };
 
-    // Lock balances in ascending user_id order (R5)
     let balance_rows = sqlx::query(
         r#"
         SELECT user_id, amount_paisa, version
@@ -239,7 +274,7 @@ pub async fn process_transfer(
     let recipient_bal = recipient_balance
         .ok_or_else(|| AppError::NotFound("Recipient balance missing".to_string()))?;
 
-    // Check sender sufficient funds (C04, atomic rollback, no ledger entries)
+    // Check sender sufficient funds (C04, atomic rollback)
     if sender_bal < amount.0 {
         return Err(AppError::Unprocessable("Insufficient balance".to_string()));
     }
@@ -247,7 +282,7 @@ pub async fn process_transfer(
     let new_sender_bal = sender_bal - amount.0;
     let new_recipient_bal = recipient_bal + amount.0;
 
-    // 8. Update balances (version + 1)
+    // 9. Update balances (version + 1)
     sqlx::query(
         r#"
         UPDATE balances
@@ -272,15 +307,16 @@ pub async fn process_transfer(
     .execute(&mut *tx)
     .await?;
 
-    // 9. Insert completed transfer
+    // 10. Insert completed transfer
     let transfer_id = Uuid::new_v4();
     sqlx::query(
         r#"
-        INSERT INTO transfers (id, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
-        VALUES ($1, $2, $3, $4, $5, 'completed', $6, now())
+        INSERT INTO transfers (id, reference, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, now())
         "#,
     )
     .bind(transfer_id)
+    .bind(&reference)
     .bind(sender_id)
     .bind(recipient_id)
     .bind(amount.0)
@@ -289,15 +325,16 @@ pub async fn process_transfer(
     .execute(&mut *tx)
     .await?;
 
-    // 10. Append 2 double-entry ledger rows (R3)
+    // 11. Append 2 double-entry ledger rows (R3, R19)
     // Sender debit (-1)
     sqlx::query(
         r#"
-        INSERT INTO ledger (txn_id, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
-        VALUES ($1, $2, $3, -1, $4, $5, 'transfer_sent', $6, now())
+        INSERT INTO ledger (txn_id, reference, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
+        VALUES ($1, $2, $3, $4, -1, $5, $6, 'transfer_sent', $7, now())
         "#,
     )
     .bind(transfer_id)
+    .bind(&reference)
     .bind(sender_id)
     .bind(recipient_id)
     .bind(amount.0)
@@ -309,11 +346,12 @@ pub async fn process_transfer(
     // Recipient credit (+1)
     sqlx::query(
         r#"
-        INSERT INTO ledger (txn_id, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
-        VALUES ($1, $2, $3, 1, $4, $5, 'transfer_received', $6, now())
+        INSERT INTO ledger (txn_id, reference, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
+        VALUES ($1, $2, $3, $4, 1, $5, $6, 'transfer_received', $7, now())
         "#,
     )
     .bind(transfer_id)
+    .bind(&reference)
     .bind(recipient_id)
     .bind(sender_id)
     .bind(amount.0)
@@ -322,7 +360,42 @@ pub async fn process_transfer(
     .execute(&mut *tx)
     .await?;
 
-    // 11. Record process event (W9)
+    // 12. Insert 2 tx_history rows (§2, W2)
+    sqlx::query(
+        r#"
+        INSERT INTO tx_history (user_id, status, kind, direction, amount_paisa, balance_after, counterparty_id, reference, entity_id, note, idempotency_key, created_at)
+        VALUES ($1, 'completed', 'transfer', 'sent', $2, $3, $4, $5, $6, $7, $8, now())
+        "#,
+    )
+    .bind(sender_id)
+    .bind(amount.0)
+    .bind(new_sender_bal)
+    .bind(recipient_id)
+    .bind(&reference)
+    .bind(transfer_id)
+    .bind(&note)
+    .bind(req.idempotency_key)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO tx_history (user_id, status, kind, direction, amount_paisa, balance_after, counterparty_id, reference, entity_id, note, idempotency_key, created_at)
+        VALUES ($1, 'completed', 'transfer', 'received', $2, $3, $4, $5, $6, $7, $8, now())
+        "#,
+    )
+    .bind(recipient_id)
+    .bind(amount.0)
+    .bind(new_recipient_bal)
+    .bind(sender_id)
+    .bind(&reference)
+    .bind(transfer_id)
+    .bind(&note)
+    .bind(req.idempotency_key)
+    .execute(&mut *tx)
+    .await?;
+
+    // 13. Record process event (W9)
     log_event_txn(
         &mut tx,
         "transfer",
@@ -331,6 +404,7 @@ pub async fn process_transfer(
         Some(sender_id),
         "Transfer successfully executed",
         serde_json::json!({
+            "reference": reference,
             "sender_id": sender_id,
             "recipient_id": recipient_id,
             "amount_paisa": amount.0,
@@ -341,11 +415,12 @@ pub async fn process_transfer(
 
     tx.commit().await?;
 
-    // 12. Asynchronous notification fanout (T14)
+    // 14. Asynchronous notification fanout (T14)
     if let Some(nats) = &state.nats {
         let event_payload = serde_json::json!({
             "event": "transfer_completed",
             "transfer_id": transfer_id,
+            "reference": reference,
             "sender_id": sender_id,
             "recipient_id": recipient_id,
             "amount_paisa": amount.0
@@ -357,6 +432,7 @@ pub async fn process_transfer(
 
     info!(
         transfer_id = %transfer_id,
+        reference = %reference,
         sender_id = %sender_id,
         recipient_id = %recipient_id,
         amount_paisa = amount.0,
@@ -365,6 +441,7 @@ pub async fn process_transfer(
 
     let resp = TransferResponse {
         id: transfer_id,
+        reference,
         sender_id,
         recipient_id,
         amount_paisa: amount.0.to_string(),
@@ -383,7 +460,7 @@ pub async fn get_transfer_detail(
 ) -> Result<TransferDetailResponse, AppError> {
     let row = sqlx::query(
         r#"
-        SELECT t.id, t.sender_id, t.recipient_id, t.amount_paisa, t.note, t.status, t.created_at,
+        SELECT t.id, t.reference, t.sender_id, t.recipient_id, t.amount_paisa, t.note, t.status, t.created_at,
                s.name as sender_name, s.account_number as sender_account,
                r.name as recipient_name, r.account_number as recipient_account
         FROM transfers t
@@ -400,13 +477,13 @@ pub async fn get_transfer_detail(
     let sender_id: Uuid = row.get("sender_id");
     let recipient_id: Uuid = row.get("recipient_id");
 
-    // Object-level authz (R11, C41): only sender or recipient can view
     if actor_id != sender_id && actor_id != recipient_id {
         return Err(AppError::NotFound("Transfer not found".to_string()));
     }
 
     let transfer = TransferResponse {
         id: row.get("id"),
+        reference: row.get("reference"),
         sender_id,
         recipient_id,
         amount_paisa: row.get::<i64, _>("amount_paisa").to_string(),
@@ -439,7 +516,6 @@ pub async fn get_transfer_events(
     actor_id: Uuid,
     transfer_id: Uuid,
 ) -> Result<Vec<ProcessEventDto>, AppError> {
-    // Verify actor is participant (R11, C38)
     let transfer = sqlx::query("SELECT sender_id, recipient_id FROM transfers WHERE id = $1")
         .bind(transfer_id)
         .fetch_optional(&state.db)

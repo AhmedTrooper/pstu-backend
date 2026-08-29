@@ -1,5 +1,7 @@
 use crate::core::error::AppError;
 use crate::core::money::Paisa;
+use crate::core::pin::enforce_user_pin;
+use crate::core::reference::generate_trx_reference;
 use crate::core::state::AppState;
 use crate::features::events::model::ProcessEventDto;
 use crate::features::events::service::log_event_txn;
@@ -98,8 +100,8 @@ pub async fn get_requests(
         JOIN users req_u ON req_u.id = mr.requester_id
         JOIN users deb_u ON deb_u.id = mr.debtor_id
         WHERE (
-            ($1 = 'incoming' AND mr.debtor_id = $2) OR
-            ($1 = 'outgoing' AND mr.requester_id = $2) OR
+            (($1 = 'incoming' OR $1 = 'debtor') AND mr.debtor_id = $2) OR
+            (($1 = 'outgoing' OR $1 = 'requester') AND mr.requester_id = $2) OR
             ($1 = 'all' AND (mr.debtor_id = $2 OR mr.requester_id = $2))
         )
         AND ($3::text IS NULL OR mr.status = $3)
@@ -162,6 +164,9 @@ pub async fn accept_request(
     request_id: Uuid,
     payload: AcceptMoneyRequest,
 ) -> Result<AcceptRequestResponse, AppError> {
+    // 1. Verify debtor PIN (R17, C46, C47)
+    enforce_user_pin(state, actor_id, &payload.pin).await?;
+
     let mut tx = state.db.begin().await?;
 
     // Lock request row FOR UPDATE (§5 W3, C11)
@@ -264,15 +269,18 @@ pub async fn accept_request(
         .execute(&mut *tx)
         .await?;
 
+    let reference = generate_trx_reference();
+
     // Insert completed transfer
     let transfer_id = Uuid::new_v4();
     sqlx::query(
         r#"
-        INSERT INTO transfers (id, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
-        VALUES ($1, $2, $3, $4, $5, 'completed', $6, now())
+        INSERT INTO transfers (id, reference, sender_id, recipient_id, amount_paisa, note, status, idempotency_key, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, now())
         "#,
     )
     .bind(transfer_id)
+    .bind(&reference)
     .bind(debtor_id)
     .bind(requester_id)
     .bind(amount_paisa)
@@ -284,11 +292,12 @@ pub async fn accept_request(
     // Append 2 double-entry ledger rows
     sqlx::query(
         r#"
-        INSERT INTO ledger (txn_id, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
-        VALUES ($1, $2, $3, -1, $4, $5, 'request_paid', $6, now())
+        INSERT INTO ledger (txn_id, reference, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
+        VALUES ($1, $2, $3, $4, -1, $5, $6, 'request_paid', $7, now())
         "#,
     )
     .bind(transfer_id)
+    .bind(&reference)
     .bind(debtor_id)
     .bind(requester_id)
     .bind(amount_paisa)
@@ -299,15 +308,51 @@ pub async fn accept_request(
 
     sqlx::query(
         r#"
-        INSERT INTO ledger (txn_id, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
-        VALUES ($1, $2, $3, 1, $4, $5, 'request_paid', $6, now())
+        INSERT INTO ledger (txn_id, reference, user_id, counterparty_id, direction, amount_paisa, running_balance, kind, idempotency_key, created_at)
+        VALUES ($1, $2, $3, $4, 1, $5, $6, 'request_paid', $7, now())
         "#,
     )
     .bind(transfer_id)
+    .bind(&reference)
     .bind(requester_id)
     .bind(debtor_id)
     .bind(amount_paisa)
     .bind(new_requester_bal)
+    .bind(payload.idempotency_key)
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert 2 tx_history rows (§2, W3)
+    sqlx::query(
+        r#"
+        INSERT INTO tx_history (user_id, status, kind, direction, amount_paisa, balance_after, counterparty_id, reference, entity_id, note, idempotency_key, created_at)
+        VALUES ($1, 'completed', 'request', 'sent', $2, $3, $4, $5, $6, $7, $8, now())
+        "#,
+    )
+    .bind(debtor_id)
+    .bind(amount_paisa)
+    .bind(new_debtor_bal)
+    .bind(requester_id)
+    .bind(&reference)
+    .bind(transfer_id)
+    .bind(&note)
+    .bind(payload.idempotency_key)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO tx_history (user_id, status, kind, direction, amount_paisa, balance_after, counterparty_id, reference, entity_id, note, idempotency_key, created_at)
+        VALUES ($1, 'completed', 'request', 'received', $2, $3, $4, $5, $6, $7, $8, now())
+        "#,
+    )
+    .bind(requester_id)
+    .bind(amount_paisa)
+    .bind(new_requester_bal)
+    .bind(debtor_id)
+    .bind(&reference)
+    .bind(transfer_id)
+    .bind(&note)
     .bind(payload.idempotency_key)
     .execute(&mut *tx)
     .await?;
@@ -330,6 +375,7 @@ pub async fn accept_request(
         serde_json::json!({
             "request_id": request_id,
             "transfer_id": transfer_id,
+            "reference": reference,
             "amount_paisa": amount_paisa
         }),
     )
@@ -352,6 +398,7 @@ pub async fn accept_request(
 
     let transfer_dto = TransferResponse {
         id: transfer_id,
+        reference,
         sender_id: debtor_id,
         recipient_id: requester_id,
         amount_paisa: amount_paisa.to_string(),
@@ -397,21 +444,14 @@ pub async fn reject_request(
         )));
     }
 
-    if actor_id != debtor_id && actor_id != requester_id {
+    if actor_id != debtor_id {
         return Err(AppError::Forbidden(
-            "You do not have permission to reject this request".to_string(),
+            "Only the debtor can reject this request".to_string(),
         ));
     }
 
-    let new_status = if actor_id == requester_id {
-        "cancelled"
-    } else {
-        "rejected"
-    };
-
     let now = Utc::now();
-    sqlx::query("UPDATE money_requests SET status = $1, resolved_at = $2 WHERE id = $3")
-        .bind(new_status)
+    sqlx::query("UPDATE money_requests SET status = 'rejected', resolved_at = $1 WHERE id = $2")
         .bind(now)
         .bind(request_id)
         .execute(&mut *tx)
@@ -421,10 +461,10 @@ pub async fn reject_request(
         &mut tx,
         "request",
         request_id,
-        new_status,
+        "rejected",
         Some(actor_id),
-        "Money request resolved",
-        serde_json::json!({ "status": new_status }),
+        "Money request rejected by debtor",
+        serde_json::json!({ "status": "rejected" }),
     )
     .await?;
 
@@ -436,7 +476,78 @@ pub async fn reject_request(
         debtor_id,
         amount_paisa: request_row.get::<i64, _>("amount_paisa").to_string(),
         note: request_row.get("note"),
-        status: new_status.to_string(),
+        status: "rejected".to_string(),
+        created_at: request_row.get("created_at"),
+        resolved_at: Some(now),
+        requester: None,
+        debtor: None,
+    })
+}
+
+pub async fn cancel_request(
+    state: &AppState,
+    actor_id: Uuid,
+    request_id: Uuid,
+) -> Result<MoneyRequestDto, AppError> {
+    let mut tx = state.db.begin().await?;
+
+    let request_row = sqlx::query(
+        r#"
+        SELECT id, requester_id, debtor_id, amount_paisa, note, status, created_at
+        FROM money_requests
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(request_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Money request not found".to_string()))?;
+
+    let requester_id: Uuid = request_row.get("requester_id");
+    let debtor_id: Uuid = request_row.get("debtor_id");
+    let status: String = request_row.get("status");
+
+    if status != "pending" {
+        return Err(AppError::Conflict(format!(
+            "Money request cannot be cancelled because it is already {}",
+            status
+        )));
+    }
+
+    if actor_id != requester_id {
+        return Err(AppError::Forbidden(
+            "Only the requester can cancel this request".to_string(),
+        ));
+    }
+
+    let now = Utc::now();
+    sqlx::query("UPDATE money_requests SET status = 'cancelled', resolved_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(request_id)
+        .execute(&mut *tx)
+        .await?;
+
+    log_event_txn(
+        &mut tx,
+        "request",
+        request_id,
+        "cancelled",
+        Some(actor_id),
+        "Money request cancelled by requester",
+        serde_json::json!({ "status": "cancelled" }),
+    )
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(MoneyRequestDto {
+        id: request_id,
+        requester_id,
+        debtor_id,
+        amount_paisa: request_row.get::<i64, _>("amount_paisa").to_string(),
+        note: request_row.get("note"),
+        status: "cancelled".to_string(),
         created_at: request_row.get("created_at"),
         resolved_at: Some(now),
         requester: None,

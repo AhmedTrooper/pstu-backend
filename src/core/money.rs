@@ -7,6 +7,9 @@ use std::sync::LazyLock;
 static MONEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\d{1,14}(\.\d{1,2})?$").expect("valid regex"));
 
+pub static PIN_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d{4,6}$").expect("valid pin regex"));
+
 // Maximum allowable transfer/holding cap (৳100M = 10,000,000,000 paisa, §6 C18)
 pub const MAX_PAISA_AMOUNT: i64 = 10_000_000_000;
 

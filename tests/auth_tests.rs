@@ -7,7 +7,8 @@ fn test_c09_registration_validation_bad_fields() {
     let payload = serde_json::json!({
         "name": "",
         "phone": "01711",
-        "password": "123"
+        "password": "123",
+        "pin": "12"
     });
 
     let reg_req: Result<RegisterRequest, _> = serde_json::from_value(payload);
@@ -16,7 +17,7 @@ fn test_c09_registration_validation_bad_fields() {
     let val_res = reg_req.validate();
     assert!(
         val_res.is_err(),
-        "Validation should fail for empty name/short password"
+        "Validation should fail for empty name/short password/short pin"
     );
 }
 

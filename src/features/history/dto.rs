@@ -1,10 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct TransactionHistoryQuery {
-    pub direction: Option<i16>,
+    pub direction: Option<String>,
     pub kind: Option<String>,
     pub status: Option<String>,
     pub counterparty: Option<String>,
@@ -26,12 +25,15 @@ pub struct CounterpartyDto {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransactionItemDto {
     pub id: i64,
-    pub txn_id: Uuid,
+    pub reference: String,
     pub kind: String,
-    pub direction: i16,
+    pub direction: String,
     pub status: String,
+    #[serde(alias = "amount")]
     pub amount_paisa: String,
+    #[serde(alias = "balance_after")]
     pub running_balance: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub counterparty: Option<CounterpartyDto>,
     pub note: String,
     pub created_at: DateTime<Utc>,

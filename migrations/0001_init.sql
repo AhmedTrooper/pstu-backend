@@ -2,13 +2,15 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
--- 1. Users Table
+-- 1. Users Table (§2, R17)
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_number VARCHAR(20) UNIQUE NOT NULL,
     name TEXT NOT NULL CHECK (char_length(name) >= 1 AND char_length(name) <= 100),
     phone VARCHAR(20) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    pin_hash TEXT NOT NULL,
+    pin_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'locked')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -25,9 +27,10 @@ CREATE TABLE IF NOT EXISTS balances (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 ) WITH (fillfactor = 70);
 
--- 3. Transfers Table (§2, §14)
+-- 3. Transfers Table (§2, §14, R19)
 CREATE TABLE IF NOT EXISTS transfers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reference TEXT NOT NULL UNIQUE,
     sender_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     recipient_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     amount_paisa BIGINT NOT NULL CHECK (amount_paisa > 0),
@@ -42,6 +45,7 @@ CREATE TABLE IF NOT EXISTS transfers (
 CREATE TABLE IF NOT EXISTS ledger (
     id BIGSERIAL PRIMARY KEY,
     txn_id UUID NOT NULL,
+    reference TEXT,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     counterparty_id UUID REFERENCES users(id) ON DELETE RESTRICT,
     direction SMALLINT NOT NULL CHECK (direction IN (-1, 1)),
@@ -101,7 +105,11 @@ CREATE TABLE IF NOT EXISTS process_events (
     id BIGSERIAL PRIMARY KEY,
     entity_type TEXT NOT NULL CHECK (entity_type IN ('transfer', 'request', 'link', 'auth', 'system')),
     entity_id UUID NOT NULL,
-    event TEXT NOT NULL CHECK (event IN ('registered', 'login_success', 'login_failed', 'logout', 'created', 'completed', 'rejected', 'flagged', 'accepted', 'cancelled', 'expired', 'claimed')),
+    event TEXT NOT NULL CHECK (event IN (
+        'registered', 'login_success', 'login_failed', 'logout', 'created',
+        'completed', 'rejected', 'flagged', 'accepted', 'cancelled', 'expired',
+        'claimed', 'pin_failed', 'pin_changed', 'pin_reset'
+    )),
     actor_id UUID REFERENCES users(id) ON DELETE RESTRICT,
     reason TEXT NOT NULL DEFAULT '',
     meta JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -113,7 +121,42 @@ CREATE INDEX IF NOT EXISTS idx_events_entity ON process_events (entity_type, ent
 CREATE INDEX IF NOT EXISTS idx_events_actor ON process_events (actor_id, id DESC) WHERE actor_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_created_at_brin ON process_events USING brin (created_at);
 
--- 8. Immutability Enforcers (§2 C39)
+-- 8. Tx History Table (Statement Read Model, §2, §14)
+CREATE TABLE IF NOT EXISTS tx_history (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL CHECK (status IN ('completed', 'rejected', 'flagged')),
+    kind TEXT NOT NULL CHECK (kind IN ('transfer', 'funding', 'request', 'link')),
+    direction TEXT NOT NULL CHECK (direction IN ('sent', 'received')),
+    amount_paisa BIGINT NOT NULL CHECK (amount_paisa > 0),
+    balance_after BIGINT NOT NULL,
+    counterparty_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+    reference TEXT NOT NULL,
+    entity_id UUID,
+    note TEXT NOT NULL DEFAULT '',
+    idempotency_key UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tx_history_user_id_id_desc ON tx_history (user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_tx_history_reference ON tx_history (reference);
+
+-- 9. Notifications Table (§2, §14)
+CREATE TABLE IF NOT EXISTS notifications (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    kind TEXT NOT NULL CHECK (kind IN ('credit', 'debit', 'request', 'link', 'system')),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    entity_type TEXT,
+    entity_id UUID,
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, read_at, id DESC);
+
+-- 10. Immutability Enforcers (§2 C39)
 CREATE OR REPLACE FUNCTION deny_ledger_and_event_mutations()
 RETURNS TRIGGER AS $$
 BEGIN

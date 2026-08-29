@@ -1,10 +1,10 @@
 use crate::core::error::AppError;
 use crate::core::state::AppState;
 use crate::features::auth::middleware::AuthenticatedUser;
-use crate::features::users::dto::{LookupQuery, UserLookupDto, UserProfileResponse};
+use crate::features::users::dto::{LookupQuery, PublicUserRes, UserLookupDto, UserProfileResponse};
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     routing::get,
 };
 use sqlx::Row;
@@ -14,6 +14,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me", get(get_me_handler))
         .route("/users/lookup", get(lookup_users_handler))
+        .route(
+            "/public/users/{account_number}",
+            get(get_public_user_handler),
+        )
 }
 
 async fn get_me_handler(
@@ -45,7 +49,7 @@ async fn get_me_handler(
         name,
         phone,
         account_number,
-        balance_paisa: amount_paisa.to_string(),
+        balance: amount_paisa.to_string(),
         created_at,
     }))
 }
@@ -87,4 +91,21 @@ async fn lookup_users_handler(
         .collect();
 
     Ok(Json(users))
+}
+
+async fn get_public_user_handler(
+    State(state): State<AppState>,
+    Path(account_number): Path<String>,
+) -> Result<Json<PublicUserRes>, AppError> {
+    let clean_acc = account_number.trim();
+    let row = sqlx::query("SELECT name, account_number FROM users WHERE account_number = $1")
+        .bind(clean_acc)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    Ok(Json(PublicUserRes {
+        name: row.get("name"),
+        account_number: row.get("account_number"),
+    }))
 }
