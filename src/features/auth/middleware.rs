@@ -9,7 +9,7 @@ use std::str::FromStr;
 use tower_cookies::Cookies;
 use uuid::Uuid;
 
-pub const SESSION_COOKIE_NAME: &str = "pstu_session";
+pub const SESSION_COOKIE_NAME: &str = "sid";
 
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
@@ -37,11 +37,11 @@ where
                     .map(|token| token.trim().to_string())
             });
 
-        // 2. Try extracting from Cookies extension
+        // 2. Try extracting from Cookies extension (support both 'sid' and 'pstu_session')
         let cookie_token = parts
             .extensions
             .get::<Cookies>()
-            .and_then(|cookies| cookies.get(SESSION_COOKIE_NAME))
+            .and_then(|cookies| cookies.get("sid").or_else(|| cookies.get("pstu_session")))
             .map(|c| c.value().to_string());
 
         let token = bearer_token

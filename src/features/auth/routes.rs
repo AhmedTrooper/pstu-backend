@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::state::AppState;
 use crate::features::auth::dto::{
@@ -9,6 +10,7 @@ use crate::features::auth::service;
 use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
 use std::collections::HashMap;
 use tower_cookies::Cookies;
+use tracing::info;
 use validator::Validate;
 
 pub fn router() -> Router<AppState> {
@@ -23,7 +25,8 @@ pub fn router() -> Router<AppState> {
 async fn register_handler(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
-) -> Result<(StatusCode, Json<RegisterResponse>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<RegisterResponse>>), AppError> {
+    info!(name = %payload.name, phone = %payload.phone, "Received user registration request");
     if let Err(val_err) = payload.validate() {
         let mut fields = HashMap::new();
         for (field, errors) in val_err.field_errors() {
@@ -43,14 +46,16 @@ async fn register_handler(
     }
 
     let res = service::register_user(&state, payload).await?;
-    Ok((StatusCode::CREATED, Json(res)))
+    info!(user_id = %res.id, account_number = %res.account_number, "User registered successfully");
+    Ok((StatusCode::CREATED, Json(ApiResponse::new(res))))
 }
 
 async fn login_handler(
     State(state): State<AppState>,
     cookies: Cookies,
     Json(payload): Json<LoginRequest>,
-) -> Result<Json<LoginResponse>, AppError> {
+) -> Result<Json<ApiResponse<LoginResponse>>, AppError> {
+    info!(phone = %payload.phone, "Received user login request");
     if let Err(val_err) = payload.validate() {
         let mut fields = HashMap::new();
         for (field, errors) in val_err.field_errors() {
@@ -70,28 +75,29 @@ async fn login_handler(
     }
 
     let res = service::login_user(&state, payload, &cookies).await?;
-    Ok(Json(res))
+    info!(user_id = %res.user.id, "User login successful");
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn logout_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     cookies: Cookies,
-) -> Result<Json<LogoutResponse>, AppError> {
+) -> Result<Json<ApiResponse<LogoutResponse>>, AppError> {
     let res = service::logout_user(&state, auth_user.user_id, &cookies).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn change_pin_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Json(payload): Json<PinChangeReq>,
-) -> Result<Json<PinUpdatedRes>, AppError> {
+) -> Result<Json<ApiResponse<PinUpdatedRes>>, AppError> {
     payload
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let res = service::change_pin(&state, auth_user.user_id, payload).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn reset_pin_handler(
@@ -99,10 +105,10 @@ async fn reset_pin_handler(
     auth_user: AuthenticatedUser,
     cookies: Cookies,
     Json(payload): Json<PinResetReq>,
-) -> Result<Json<PinUpdatedRes>, AppError> {
+) -> Result<Json<ApiResponse<PinUpdatedRes>>, AppError> {
     payload
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let res = service::reset_pin(&state, auth_user.user_id, payload, &cookies).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }

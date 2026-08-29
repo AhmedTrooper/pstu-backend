@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::state::AppState;
 use crate::features::auth::middleware::AuthenticatedUser;
@@ -23,7 +24,7 @@ pub fn router() -> Router<AppState> {
 async fn get_me_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
-) -> Result<Json<UserProfileResponse>, AppError> {
+) -> Result<Json<ApiResponse<UserProfileResponse>>, AppError> {
     let row = sqlx::query(
         r#"
         SELECT u.id, u.name, u.phone, u.account_number, u.created_at, b.amount_paisa
@@ -44,27 +45,26 @@ async fn get_me_handler(
     let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
     let amount_paisa: i64 = row.get("amount_paisa");
 
-    Ok(Json(UserProfileResponse {
+    Ok(Json(ApiResponse::new(UserProfileResponse {
         id,
         name,
         phone,
         account_number,
         balance: amount_paisa.to_string(),
         created_at,
-    }))
+    })))
 }
 
 async fn lookup_users_handler(
     State(state): State<AppState>,
     _auth_user: AuthenticatedUser,
     Query(params): Query<LookupQuery>,
-) -> Result<Json<Vec<UserLookupDto>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<UserLookupDto>>>, AppError> {
     let q = params.q.unwrap_or_default().trim().to_string();
     if q.is_empty() {
-        return Ok(Json(Vec::new()));
+        return Ok(Json(ApiResponse::new(Vec::new())));
     }
 
-    // Lookup using exact phone/account_number or trigram gin index on name (§14)
     let rows = sqlx::query(
         r#"
         SELECT id, name, account_number, phone
@@ -90,13 +90,13 @@ async fn lookup_users_handler(
         })
         .collect();
 
-    Ok(Json(users))
+    Ok(Json(ApiResponse::new(users)))
 }
 
 async fn get_public_user_handler(
     State(state): State<AppState>,
     Path(account_number): Path<String>,
-) -> Result<Json<PublicUserRes>, AppError> {
+) -> Result<Json<ApiResponse<PublicUserRes>>, AppError> {
     let clean_acc = account_number.trim();
     let row = sqlx::query("SELECT name, account_number FROM users WHERE account_number = $1")
         .bind(clean_acc)
@@ -104,8 +104,8 @@ async fn get_public_user_handler(
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    Ok(Json(PublicUserRes {
+    Ok(Json(ApiResponse::new(PublicUserRes {
         name: row.get("name"),
         account_number: row.get("account_number"),
-    }))
+    })))
 }

@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::state::AppState;
 use crate::features::auth::middleware::AuthenticatedUser;
@@ -33,7 +34,7 @@ async fn create_request_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Json(payload): Json<CreateMoneyRequest>,
-) -> Result<(StatusCode, Json<MoneyRequestDto>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<MoneyRequestDto>>), AppError> {
     if let Err(val_err) = payload.validate() {
         let mut fields = HashMap::new();
         for (field, errors) in val_err.field_errors() {
@@ -53,16 +54,16 @@ async fn create_request_handler(
     }
 
     let req = service::create_request(&state, auth_user.user_id, payload).await?;
-    Ok((StatusCode::CREATED, Json(req)))
+    Ok((StatusCode::CREATED, Json(ApiResponse::new(req))))
 }
 
 async fn get_requests_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Query(params): Query<GetRequestsQuery>,
-) -> Result<Json<PaginatedRequestsResponse>, AppError> {
+) -> Result<Json<ApiResponse<PaginatedRequestsResponse>>, AppError> {
     let res = service::get_requests(&state, auth_user.user_id, params).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn accept_request_handler(
@@ -70,37 +71,37 @@ async fn accept_request_handler(
     auth_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
     Json(payload): Json<AcceptMoneyRequest>,
-) -> Result<Json<AcceptRequestResponse>, AppError> {
+) -> Result<Json<ApiResponse<AcceptRequestResponse>>, AppError> {
     payload
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let res = service::accept_request(&state, auth_user.user_id, id, payload).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn reject_request_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<MoneyRequestDto>, AppError> {
+) -> Result<Json<ApiResponse<MoneyRequestDto>>, AppError> {
     let res = service::reject_request(&state, auth_user.user_id, id).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn cancel_request_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<MoneyRequestDto>, AppError> {
+) -> Result<Json<ApiResponse<MoneyRequestDto>>, AppError> {
     let res = service::cancel_request(&state, auth_user.user_id, id).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn get_request_events_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<ProcessEventDto>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<ProcessEventDto>>>, AppError> {
     let events = service::get_request_events(&state, auth_user.user_id, id).await?;
-    Ok(Json(events))
+    Ok(Json(ApiResponse::new(events)))
 }

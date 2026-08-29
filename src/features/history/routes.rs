@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::state::AppState;
 use crate::features::auth::middleware::AuthenticatedUser;
@@ -25,9 +26,9 @@ async fn get_transactions_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Query(params): Query<TransactionHistoryQuery>,
-) -> Result<Json<PaginatedTransactionsResponse>, AppError> {
+) -> Result<Json<ApiResponse<PaginatedTransactionsResponse>>, AppError> {
     let res = service::get_transactions(&state, auth_user.user_id, params).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn get_statement_csv_handler(
@@ -54,8 +55,8 @@ async fn get_activity_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Query(params): Query<ActivityQuery>,
-) -> Result<Json<Vec<ProcessEventDto>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<ProcessEventDto>>>, AppError> {
     let events =
         service::get_user_activity(&state, auth_user.user_id, params.cursor, params.limit).await?;
-    Ok(Json(events))
+    Ok(Json(ApiResponse::new(events)))
 }

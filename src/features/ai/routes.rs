@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::ratelimit::enforce_rate_limit;
 use crate::core::state::AppState;
@@ -15,7 +16,7 @@ async fn parse_ai_intent_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Json(payload): Json<AIParseRequest>,
-) -> Result<Json<AIParseResponse>, AppError> {
+) -> Result<Json<ApiResponse<AIParseResponse>>, AppError> {
     // 30 AI parse requests / minute per user (R13, T31)
     enforce_rate_limit(&state, "ai_parse", &auth_user.user_id.to_string(), 30, 60).await?;
 
@@ -23,5 +24,5 @@ async fn parse_ai_intent_handler(
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let resp = parser::parse_intent(&payload.text);
-    Ok(Json(resp))
+    Ok(Json(ApiResponse::new(resp)))
 }

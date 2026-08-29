@@ -297,6 +297,7 @@ pub async fn login_user(
     let mut cookie = Cookie::new("sid", session_token);
     cookie.set_http_only(true);
     cookie.set_path("/");
+    cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
     cookie.set_max_age(Some(tower_cookies::cookie::time::Duration::seconds(
         session_ttl as i64,
     )));
@@ -341,6 +342,7 @@ pub async fn logout_user(
 
         let mut remove_cookie = Cookie::new("sid", "");
         remove_cookie.set_path("/");
+        remove_cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
         remove_cookie.set_max_age(Some(tower_cookies::cookie::time::Duration::seconds(0)));
         cookies.add(remove_cookie);
     }

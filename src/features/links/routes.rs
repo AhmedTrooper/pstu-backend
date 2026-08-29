@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::ratelimit::enforce_rate_limit;
 use crate::core::state::AppState;
@@ -32,7 +33,7 @@ async fn create_link_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Json(payload): Json<CreatePaymentLinkRequest>,
-) -> Result<(StatusCode, Json<PaymentLinkDto>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<PaymentLinkDto>>), AppError> {
     // 20 link creations / minute per user (R13, T31)
     enforce_rate_limit(&state, "links", &auth_user.user_id.to_string(), 20, 60).await?;
 
@@ -55,24 +56,24 @@ async fn create_link_handler(
     }
 
     let link = service::create_link(&state, auth_user.user_id, payload).await?;
-    Ok((StatusCode::CREATED, Json(link)))
+    Ok((StatusCode::CREATED, Json(ApiResponse::new(link))))
 }
 
 async fn get_my_links_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Query(params): Query<GetMyLinksQuery>,
-) -> Result<Json<PaginatedLinksResponse>, AppError> {
+) -> Result<Json<ApiResponse<PaginatedLinksResponse>>, AppError> {
     let res = service::get_my_links(&state, auth_user.user_id, params).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn get_link_handler(
     State(state): State<AppState>,
     Path(token): Path<String>,
-) -> Result<Json<PaymentLinkDto>, AppError> {
+) -> Result<Json<ApiResponse<PaymentLinkDto>>, AppError> {
     let link = service::get_link_by_token(&state, &token).await?;
-    Ok(Json(link))
+    Ok(Json(ApiResponse::new(link)))
 }
 
 async fn claim_link_handler(
@@ -80,7 +81,7 @@ async fn claim_link_handler(
     auth_user: AuthenticatedUser,
     Path(token): Path<String>,
     Json(payload): Json<ClaimPaymentLinkRequest>,
-) -> Result<(StatusCode, Json<ClaimPaymentLinkResponse>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<ClaimPaymentLinkResponse>>), AppError> {
     // 10 claim attempts / minute per user (R13, T31)
     enforce_rate_limit(&state, "claim_link", &auth_user.user_id.to_string(), 10, 60).await?;
 
@@ -88,23 +89,23 @@ async fn claim_link_handler(
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let res = service::claim_link(&state, auth_user.user_id, &token, payload).await?;
-    Ok((StatusCode::CREATED, Json(res)))
+    Ok((StatusCode::CREATED, Json(ApiResponse::new(res))))
 }
 
 async fn cancel_link_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Path(token): Path<String>,
-) -> Result<Json<PaymentLinkDto>, AppError> {
+) -> Result<Json<ApiResponse<PaymentLinkDto>>, AppError> {
     let res = service::cancel_link(&state, auth_user.user_id, &token).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn get_link_events_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<ProcessEventDto>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<ProcessEventDto>>>, AppError> {
     let events = service::get_link_events(&state, auth_user.user_id, id).await?;
-    Ok(Json(events))
+    Ok(Json(ApiResponse::new(events)))
 }

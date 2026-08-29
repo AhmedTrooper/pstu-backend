@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::state::AppState;
 use crate::features::auth::middleware::AuthenticatedUser;
@@ -20,19 +21,19 @@ async fn get_notifications_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Query(params): Query<NotifQuery>,
-) -> Result<Json<NotificationsResponse>, AppError> {
+) -> Result<Json<ApiResponse<NotificationsResponse>>, AppError> {
     let res = service::get_notifications(&state, auth_user.user_id, params).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }
 
 async fn mark_read_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Json(payload): Json<NotifReadReq>,
-) -> Result<Json<OkRes>, AppError> {
+) -> Result<Json<ApiResponse<OkRes>>, AppError> {
     payload
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let res = service::mark_notifications_read(&state, auth_user.user_id, payload).await?;
-    Ok(Json(res))
+    Ok(Json(ApiResponse::new(res)))
 }

@@ -1,3 +1,4 @@
+use crate::core::envelope::ApiResponse;
 use crate::core::error::AppError;
 use crate::core::ratelimit::enforce_rate_limit;
 use crate::core::state::AppState;
@@ -58,23 +59,23 @@ async fn create_transfer_handler(
         StatusCode::CREATED
     };
 
-    Ok((status_code, Json(transfer)).into_response())
+    Ok((status_code, Json(ApiResponse::new(transfer))).into_response())
 }
 
 async fn get_transfer_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<TransferDetailResponse>, AppError> {
+) -> Result<Json<ApiResponse<TransferDetailResponse>>, AppError> {
     let detail = service::get_transfer_detail(&state, auth_user.user_id, id).await?;
-    Ok(Json(detail))
+    Ok(Json(ApiResponse::new(detail)))
 }
 
 async fn get_transfer_events_handler(
     State(state): State<AppState>,
     auth_user: AuthenticatedUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<ProcessEventDto>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<ProcessEventDto>>>, AppError> {
     let events = service::get_transfer_events(&state, auth_user.user_id, id).await?;
-    Ok(Json(events))
+    Ok(Json(ApiResponse::new(events)))
 }
