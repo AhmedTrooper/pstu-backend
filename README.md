@@ -57,7 +57,8 @@ We selected **Rust + Axum** over alternatives like Python/FastAPI for mission-cr
 - [x] **T43**: `GET /me/statement.csv` (P25) statement CSV export with 10k safety gate (C45).
 
 ### Phase 4: Money Requests
-- [ ] **T21**: `POST /requests` (P8), `GET /requests` (P9), `POST /requests/{id}/accept` (P10), and `POST /requests/{id}/reject` (P11) under Workflow W3.
+- [x] **T21**: `POST /requests` (P8), `GET /requests` (P9), `POST /requests/{id}/accept` (P10), and `POST /requests/{id}/reject` (P11) under Workflow W3.
+- [x] **T23**: Direct acceptance and rejection tests (C11, C12).
 
 ### Phase 5: Payment Links & AI Intent Parser
 - [ ] **T24-T26**: `POST /links` (P13), `GET /links/{token}` (P14), `POST /links/{token}/claim` (P15), `POST /links/{token}/cancel` (P16) under Workflow W4/W5.
